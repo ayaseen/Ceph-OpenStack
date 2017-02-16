@@ -1,0 +1,191 @@
+---
+   #- name: Pause the execution of Ceph installation!
+    # pause: prompt='Please confirm you want to start Ceph installation! Press Enter to continue. Press Ctrl+c and then "a" to abort'
+
+   - name: Prepare Ceph admin node.
+     shell: ssh-keygen -q -N "" -f /root/.ssh/id_rsa ;sshpass -p "@dmin123" ssh-copy-id -o StrictHostKeyChecking=no {{ item }}
+     with_items:
+     - admin
+     - osd01
+     - osd02
+     when: inventory_hostname == "admin"
+
+   - name: Add ceph ssh key to others node acting as clietns.
+     shell: ssh-keygen -q -N "" -f .ssh/id_rsa;sshpass -p "@dmin123" ssh-copy-id -o StrictHostKeyChecking=no {{ item }}
+     with_items:
+     - "{{ controller }}"
+     - "{{ compute }}"
+     - admin
+     - osd01
+     - osd02
+     #become: yes
+     become_user: "{{ ceph_user }}"
+     when: inventory_hostname == "admin"
+
+## Prepare admin ceph node and osd nodes, assuming disk /dev/vdb, size 20 GiB
+
+   - name: Install ceph-deploy package on admin node
+     yum: name=ceph-deploy state=latest
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: Initiate Ceph nodes.
+     shell:  ceph-deploy new admin osd01 osd02
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+  # - name: Update Ceph conf file.
+  #   shell: echo "osd journal size = 1024" | sudo tee -a  ceph.conf; echo "osd pool default size = 2" | sudo tee -a  ceph.conf;echo "osd default min size = 1" | sudo tee -a  ceph.conf
+  #   become: yes
+  #   become_user: "{{ ceph_user }}"
+  #   when: inventory_hostname == "admin"
+
+   - name: Update Ceph conf file.
+     blockinfile:
+       dest: ceph.conf
+       regexp: '^osd'
+       block: |
+         osd journal size = {{ journal_size }}
+         osd pool default size = {{ pool_size }}
+         osd default min size = {{ min_size }}
+         [mon]
+         mon_clock_drift_allowed = {{ mon_clock_drift_allowed }}
+         mon_clock_drift_warn_backoff = {{ mon_clock_drift_warn_backoff }}
+       #marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.name }}"
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: Install ceph on admin/osd
+     shell:  ceph-deploy install admin osd01 osd02
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: Update  ceph config on mon/osd
+     shell:  ceph-deploy --overwrite-conf config push admin osd01 osd02
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: Create  ceph mon on all ceph's nodes
+     shell:  ceph-deploy mon create admin osd01 osd02
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     #args:
+      #   creates: /etc/ceph/ceph.conf
+     when: inventory_hostname == "admin"
+
+   - wait_for:
+      path: /etc/ceph/ceph.client.admin.keyring
+      state: present
+      delay: 10
+     when: inventory_hostname == "admin"
+
+   - name: Gatherkeys of osd creation.
+     shell:  ceph-deploy gatherkeys admin
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: Create osd nodes.
+     shell:  ceph-deploy osd create  osd01:vdb osd02:vdb
+     register: osd_result
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+     failed_when: >
+         osd_result.rc != 0 and ("ceph_disk.main.Error: Error: Device is mounted:" not in osd_result.stderr)
+     changed_when: "osd_result.rc == 0"
+
+## NTP sync whether to enable or not, please check vars/main.yml file
+   - name: Sync ntp to fix ceph warning health state
+     shell: ntpdate -u {{ ntpServer }};ntpdate -u {{ ntpServer }}
+     when: "'1' == {{ ntp_check }}"
+
+   - name: Restart all ceph services.
+     service: name={{ item }} state=restarted enabled=true
+     with_items:
+      - network
+      - ceph.target
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     #when: '"ceph" in group_names'
+
+   - name: create openstack pool
+     command: ceph  osd pool create {{ item.name }} {{ item.pg_num }}
+     with_items:
+       - { name: "{{ openstack_glance_pool }}", pg_num: "{{ pg_num }}" }
+       - { name: "{{ openstack_cinder_pool }}", pg_num: "{{ pg_num }}" }
+       - { name: "{{ openstack_nova_pool }}", pg_num: "{{ pg_num }}" }
+       - { name: "{{ openstack_cinder_backup_pool }}", pg_num: "{{ pg_num }}" }
+     register: pool_result
+     changed_when: "pool_result.rc == 0"
+     failed_when: >
+       pool_result.rc !=0 and ("already exists" in pool_result.stderr)
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: create openstack keys
+     shell: ceph --cluster {{ cluster }} auth get-or-create {{ item.name }} {{ item.value }} -o /etc/ceph/{{ cluster }}.{{ item.name }}.keyring
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     args:
+       creates: /etc/ceph/{{ cluster }}.{{ item.name }}.keyring
+     with_items:
+       - { name: client.images , value: "{{ image_auth }}" }
+       - { name: client.volumes , value: "{{ volumes_auth }}" }
+       - { name: client.backup , value: "{{ backup_auth }}" }
+     when: inventory_hostname == "admin"
+
+## copy ceph configuration file and auth keys to OpenStack nodes.
+
+   - name: Copy ceph config file into OpenStack nodes.
+     command: sshpass -p "{{ root_password }}"  scp  -o StrictHostKeyChecking=no {{ item.name }}  root@{{ item.value }}:"{{ ceph_path }}"
+     with_items:
+       - { name: "{{ ceph_conf }}" , value: "{{ controller }}" }
+       - { name: "{{ ceph_conf }}" , value: "{{ compute }}" }
+     when: inventory_hostname == "admin"
+
+   - name: Copy ceph auth keys into OpenStack nodes.
+     command: sshpass -p "{{ root_password }}" scp -o StrictHostKeyChecking=no {{ item.name }}  root@{{ item.value }}:"{{ ceph_path }}"
+     with_items:
+       - { name: "{{ ceph_image }}" , value: "{{ controller }}" }
+       - { name: "{{ ceph_volumes }}" , value: "{{ controller }}" }
+       - { name: "{{ ceph_volumes }}" , value: "{{ compute }}" }
+       - { name: "{{ ceph_backup }}" , value: "{{ controller }}" }
+     when: inventory_hostname == "admin"
+
+   - name: generate keys for cinder & Backup.
+     shell: ceph auth get-key {{ item.name }} |  tee {{ item.value }}
+     with_items:
+       - { name: client.volumes , value: client.volumes.key }
+       - { name: client.backup , value: client.backup.key }
+     become: yes
+     become_user: "{{ ceph_user }}"
+     become_method: sudo
+     when: inventory_hostname == "admin"
+
+   - name: copy keys for cinder & Backup into compute to virsh it later.
+     shell: scp -o StrictHostKeyChecking=no -r {{ item.name }}  {{ item.value }}:"{{ ceph_home }}"
+     with_items:
+       - { name: client.volumes.key , value: "{{ compute }}" }
+       - { name: client.backup.key , value: "{{ compute }}" }
+     become: yes
+     become_user: "{{ ceph_user }}"
+     when: inventory_hostname == "admin"
+

@@ -1,0 +1,166 @@
+---
+   - name: Pause the execution of OpenStack installation!
+     pause: prompt='Please confirm you want to start OpenStack installation! Press Enter to continue. Press Ctrl+c and then "a" to abort'
+
+## Glance Integration with Ceph
+   - name: Change group and owner for ceph key on control.
+     file:
+      path: "{{ ceph_image }}"
+      owner: glance
+      group: glance
+      mode: 0644
+     when: inventory_hostname == "{{ controller }}"
+
+   - name: Update ceph config file on "{{ controller }}"
+     blockinfile:
+       dest: "{{ ceph_conf }}"
+       regexp: '^key'
+       block: |
+         [client.image]
+          key = {{ image_key }}
+          keyring = {{ ceph_image }}
+
+         [client.volumes]
+          key = {{ volumes_key }}
+          keyring = {{ ceph_volumes }}
+
+         [client.backup]
+          key = {{ backup_key }}
+          keyring = {{ ceph_backup }}
+       #marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.name }}"
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     register: status
+     when: inventory_hostname == "{{ controller }}"
+
+   - name: Update ceph config file on "{{ compute }}"
+     blockinfile:
+       dest: "{{ ceph_conf }}"
+       block: |
+        [client]
+        rbd cache = true
+        rbd cache writethrough until flush = true
+        rbd concurrent management ops = 20
+
+        [client.volumes]
+        key = {{ volumes_key }}
+        keyring = {{ ceph_volumes }}
+
+       marker: "# {mark} ANSIBLE MANAGED BLOCK #"
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     register: status
+     when: inventory_hostname == "{{ compute }}"
+
+## Update glance[Image] config file to load ceph driver.
+
+   - name: Update glance.conf file for ceph ready!
+     blockinfile:
+       dest: "{{ glance_conf }}"
+       block: |
+        [glance_store]
+        stores = glance.store.rbd.Store
+        default_store = rbd
+        rbd_store_pool = images
+        rbd_store_user = images
+        rbd_store_ceph_conf = /etc/ceph/ceph.conf
+       marker: "# {mark} ANSIBLE MANAGED BLOCK #"
+     run_once: true
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     notify: restart-glance-api
+     when: inventory_hostname == "{{ controller }}"
+
+## Start integrate  part of cinder service with ceph ###
+   - name: Generate xml secret for cinder to virsh it so KVM can access cinder volumes.
+     blockinfile:
+       create : yes
+       dest: "{{ cinder_xml }}"
+       block: |
+        <secret ephemeral="no" private="no">
+         <uuid>{{ cinder_uuid }}</uuid>
+         <usage type="ceph">
+         <name>client.volumes secret</name>
+         </usage>
+        </secret>
+       marker: "<!-- {mark} ANSIBLE MANAGED BLOCK -->"
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     when: inventory_hostname == "{{ compute }}"
+
+   - name: virsh the secret "{{ cinder_xml }} file to access KVM".
+     shell: "{{ item }}"
+     with_items:
+      - virsh secret-define --file /root/"{{ cinder_xml }}"
+      - virsh secret-set-value --secret "{{ cinder_uuid }}" --base64 $(cat "{{ ceph_home }}"client.volumes.key)
+     when: inventory_hostname == "{{ compute }}"
+
+   - name: Update cinder config file to default backend to be ceph.
+     shell: "{{ item }}"
+     with_items:
+     - sed -i -e "s/enabled_backends.*/enabled_backends = ceph/" "{{ cinder_conf }}"
+     when: inventory_hostname == "{{ controller }}"
+
+   - name: Update cinder.conf file for ceph ready!
+     blockinfile:
+       dest: "{{ cinder_conf }}"
+       block: |
+        [ceph]
+        volume_driver = cinder.volume.drivers.rbd.RBDDriver
+        rbd_pool = volumes
+        rbd_ceph_conf = /etc/ceph/ceph.conf
+        rbd_flatten_volume_from_snapshot = false
+        rbd_max_clone_depth = 5
+        rbd_store_chunk_size = 4
+        rados_connect_timeout = -1
+        glance_api_version = 2
+        rbd_user = volumes
+        rbd_secret_uuid = {{ cinder_uuid }}
+       marker: "# {mark} ANSIBLE MANAGED BLOCK #"
+     run_once: true
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     notify: restart-cinder
+     when: inventory_hostname == "{{ controller }}"
+
+## End integrate  part of cinder service  with ceph ###
+
+
+## Start integrate  part of nova service  with ceph ###
+
+   - name: Update nova config file to default backend to be ceph.
+     shell: "{{ item }}"
+     with_items:
+     - sed -i -e "s/eforce_raw_images.*/force_raw_images = True/" "{{ nova_conf }}"
+     ## Enable cachemode
+     - sed -i -e "s/'disk_cachemodes.*/'disk_cachemodes = writeback/" "{{ nova_conf }}"
+     when: inventory_hostname == "{{ compute }}"
+
+   - name: Update nova.conf file for ceph ready!
+     blockinfile:
+       dest: "{{ nova_conf }}"
+       block: |
+        [libvirt]
+        images_type = rbd
+        images_rbd_pool = vms
+        images_rbd_ceph_conf = /etc/ceph/ceph.conf
+        rbd_user = cinder
+        rbd_secret_uuid = {{ cinder_uuid }}
+        disk_cachemodes="network=writeback"
+        inject_password = false
+        inject_key = false
+        inject_partition = -2
+        live_migration_flag="VIR_MIGRATE_UNDEFINE_SOURCE,VIR_MIGRATE_PEER2PEER,VIR_MIGRATE_LIVE,VIR_MIGRATE_PERSIST_DEST,VIR_MIGRATE_TUNNELLED"
+        hw_disk_discard = unmap
+       marker: "# {mark} ANSIBLE MANAGED BACKUP #"
+       insertafter: "rbd_secret_uuid"
+     notify: restart-nova
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     when: inventory_hostname == "{{ compute }}"
