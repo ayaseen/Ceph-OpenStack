@@ -26,8 +26,6 @@
       - rhel-7-server-rhceph-2-mon-rpms
       - rhel-7-server-rhscon-2-installer-rpms
       - rhel-7-server-rhscon-2-agent-rpms
-      - rhel-7-server-rhscon-2-installer-rpms
-      - rhel-7-server-rhscon-2-agent-rpms
       - rhel-7-server-rhceph-2-tools-rpms
       - rhel-7-server-rhceph-2-osd-rpms
      become: yes
