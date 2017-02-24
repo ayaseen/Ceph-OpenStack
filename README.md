@@ -1,5 +1,5 @@
 # Ceph-OpenStack
-<<<<<<< HEAD
+
 Integrate ceph storage 2 as a backend for OpenStack (Ocata & OSP 8)using Ansible
 =======
 Integrate ceph storage as a backend for OpenStack using Ansible. 
@@ -19,4 +19,4 @@ Usage :
 All you have to do is make some changes on var.yaml in each role based in your requirements,  I encourage you to review each role to be familiar what are exactly do. 
 
 [TDO] 
->>>>>>> 2da03aa93b68f6729173931ad955261621acece4
+
