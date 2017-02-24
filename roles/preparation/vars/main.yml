@@ -1,8 +1,0 @@
----
-#ntpServer: "0.asia.pool.ntp.org"
-ntpServer: "192.168.0.183"
-ceph_user: "ceph"
-password: "$6$qy9gykq8j0ipKsnc$dR0HsueAaJWyzgXQ3sTNy9XjGXRRN1Ce7tnS.Y/R1.kqAz0FVwoX7nwDi2qrn15fzAXzufmg0sa/NnFZIImEp0"
-controller: "control"
-compute: "compute01"
-ntp_check: "1"
