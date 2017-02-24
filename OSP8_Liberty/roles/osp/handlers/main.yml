@@ -1,0 +1,4 @@
+---
+
+- name: restart_ipa
+  service: name=ipa state=restarted

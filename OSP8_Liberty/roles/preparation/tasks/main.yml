@@ -1,0 +1,95 @@
+---
+   - name: Update systems to latest.
+     yum: name=* state=latest
+   - name: install pre-requisist packages.
+     yum: name={{ item }} state=latest
+     with_items:
+     - yum-utils
+     - sshpass
+   - name: Configure yum with require channels.
+     shell: yum-config-manager --disable rh*;yum-config-manager --disable cf*;yum-config-manager --disable jb*;yum-config-manager --enable rhel-7-server-rpms
+   - service: name={{ item }} state=stopped enabled=false
+     with_items:
+     - NetworkManager
+     - firewalld
+     register: status
+
+## This action only for idempotency
+   - name: restart network service.
+     service: name=network state=restarted enabled=true
+     when: status.changed
+
+## Enable Ceph repos
+   - name: Enable Mon repos
+     command: yum-config-manager --enable {{ item }}
+     with_items:
+      - rhel-7-server-rhceph-2-mon-rpms
+      - rhel-7-server-rhscon-2-installer-rpms
+      - rhel-7-server-rhscon-2-agent-rpms
+      - rhel-7-server-rhceph-2-tools-rpms
+      - rhel-7-server-rhceph-2-osd-rpms
+     become: yes
+     become_user: "root"
+     become_method: sudo
+     when: '"ceph" in group_names'
+
+
+   - name: Enable ops client repos
+     shell: yum-config-manager --enable {{ item }}
+     with_items:
+      - rhel-7-server-rhceph-2-tools-rpms
+      - rhel-7-server-openstack-8-director-rpms
+      - rhel-7-server-openstack-8-tools-rpms
+      - rhel-7-server-openstack-8-rpms
+      - rhel-7-server-openstack-8-optools-rpms
+      - rhel-7-server-rh-common-rpms
+      - rhel-7-server-extras-rpms
+     when: '"osp" in group_names'
+
+## Install Ceph client packages on OpenStack nodes
+   - name: Install Ceph client packages.
+     yum: name={{ item }} state=latest
+     with_items:
+      - ceph-common
+      - python-rbd
+     when: '"osp" in group_names'
+
+
+## Set SELINUX into Permissive
+   - lineinfile:
+      dest: /etc/selinux/config
+      regexp: '^SELINUX='
+      line: 'SELINUX=permissive'
+
+## Add Ceph user on all nodes.
+   - name: Add Ceph User.
+     user:
+      name: "{{ ceph_user }}"
+      comment: "Ceph User"
+      shell: /bin/bash
+      createhome: yes
+      home: /home/ceph
+      generate_ssh_key: yes
+      ssh_key_bits: 2048
+      ssh_key_file: .ssh/id_rsa
+      update_password: always
+      password: "{{ password }}"
+
+## Add ceph user to Sudoers
+   - name: Add ceph user to Sudoers /etc/sudoers
+     blockinfile:
+       dest: /etc/sudoers
+       regexp: '^ceph'
+       block: |
+         {{ item.name }}
+
+       marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item.name }}"
+     with_items:
+       - { name: "ceph ALL = (root) NOPASSWD:ALL" }
+       - { name: "Defaults:ceph !requiretty" }
+
+
+## NTP sync whether to enable or not, please check vars/main.yml file
+   - name: Sync ntp to fix ceph warning health state
+     shell: ntpdate -u {{ ntpServer }};ntpdate -u {{ ntpServer }}
+     when: "'1' == {{ ntp_check }}"
