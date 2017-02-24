@@ -75,6 +75,14 @@
      when: inventory_hostname == "{{ controller }}"
 
 ## Start integrate  part of cinder service with ceph ###
+   - name: Change group and owner for ceph key on control.
+     file:
+      path: "{{ ceph_volumes }}"
+      #owner: cinder
+      group: cinder
+      mode: 0644
+     when: inventory_hostname == "{{ controller }}"
+
    - name: Generate xml secret for cinder to virsh it so KVM can access cinder volumes.
      blockinfile:
        create : yes
@@ -102,14 +110,14 @@
    - name: Update cinder config file to default backend to be ceph.
      shell: "{{ item }}"
      with_items:
-     - sed -i -e "s/enabled_backends.*/enabled_backends = ceph/" "{{ cinder_conf }}"
+     - sed -i -e "s/enabled_backends.*/enabled_backends = rbd/" "{{ cinder_conf }}"
      when: inventory_hostname == "{{ controller }}"
 
    - name: Update cinder.conf file for ceph ready!
      blockinfile:
        dest: "{{ cinder_conf }}"
        block: |
-        [ceph]
+        [rbd]
         volume_driver = cinder.volume.drivers.rbd.RBDDriver
         rbd_pool = volumes
         rbd_ceph_conf = /etc/ceph/ceph.conf
@@ -132,6 +140,13 @@
 
 
 ## Start integrate  part of nova service  with ceph ###
+   - name: Change group and owner for ceph key on compute.
+     file:
+      path: "{{ ceph_volumes }}"
+      #owner: nova
+      group: nova
+      mode: 0644
+     when: inventory_hostname == "{{ compute }}"
 
    - name: Update nova config file to default backend to be ceph.
      shell: "{{ item }}"
@@ -149,7 +164,7 @@
         images_type = rbd
         images_rbd_pool = vms
         images_rbd_ceph_conf = /etc/ceph/ceph.conf
-        rbd_user = cinder
+        rbd_user = volumes
         rbd_secret_uuid = {{ cinder_uuid }}
         disk_cachemodes="network=writeback"
         inject_password = false

@@ -19,6 +19,8 @@
      #- {{ another_compute_if_require}}
      when: inventory_hostname == "{{ controller }}"
 
+   - name: Start openvswitch service.
+     service: name=openvswitch state=restarted enabled=yes
 
 ## Create bridges br-ex
    - name: Update  eth0 file.
@@ -117,6 +119,7 @@
    - name: Creating networks,security group,keys ...
      shell: "{{ item }}"
      with_items:
+      - source /root/keystonerc_admin; openstack volume type create --property volume_backend_name=RBD CEPH;openstack volume type delete iscsi
 #     - source /root/keystonerc_admin;neutron net-create int; neutron subnet-create --name subint int 192.168.1.0/24 --allocation-pool start=192.168.1.100,end=192.168.1.200
 #     - source /root/keystonerc_admin;neutron net-create ext; neutron subnet-create --allocation-pool start=192.168.2.100,end=192.168.2.199 --gateway 192.168.2.1 --disable-dhcp --name subext ext 192.168.2.0/24
 #     - source /root/keystonerc_admin;neutron router-create router1; neutron net-update ext --router:external=True; neutron router-gateway-set router1 ext; neutron router-interface-add router1 subint
