@@ -75,6 +75,13 @@
      when: inventory_hostname == "{{ controller }}"
 
 ## Start integrate  part of cinder service with ceph ###
+   - name: Change group and owner for ceph key on control.
+     file:
+      path: "{{ ceph_volumes }}"
+      group: cinder
+      mode: 0644
+     when: inventory_hostname == "{{ controller }}"
+
    - name: Generate xml secret for cinder to virsh it so KVM can access cinder volumes.
      blockinfile:
        create : yes
@@ -132,6 +139,12 @@
 
 
 ## Start integrate  part of nova service  with ceph ###
+   - name: Change group and owner for ceph key on control.
+     file:
+      path: "{{ ceph_volumes }}"
+      group: nova
+      mode: 0644
+     when: inventory_hostname == "{{ compute }}"
 
    - name: Update nova config file to default backend to be ceph.
      shell: "{{ item }}"
