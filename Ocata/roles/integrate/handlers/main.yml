@@ -1,0 +1,17 @@
+---
+
+   - name: restart-glance-api
+     service: name=openstack-glance-api state=restarted
+     when: inventory_hostname == "{{ controller }}"
+
+   - name: restart-cinder
+     service: name={{ item }} state=restarted
+     with_items:
+      - openstack-cinder-api
+      - openstack-cinder-scheduler
+      - openstack-cinder-volume
+     when: inventory_hostname == "{{ controller }}"
+
+   - name: restart-nova
+     service: name=openstack-nova-compute state=restarted
+     when: inventory_hostname == "{{ compute }}"

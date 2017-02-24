@@ -1,0 +1,31 @@
+---
+# Prepare OpenStack and Ceph Environment.
+#
+
+- hosts: all
+  become: True
+  vars_files:
+  - main.yaml
+  roles:
+  - preparation
+
+- hosts: ceph
+  become: True
+  vars_files:
+  - main.yaml
+  roles:
+  - ceph
+
+- hosts: osp
+  become: True
+  vars_files:
+  - main.yaml
+  roles:
+  - osp
+
+- hosts: osp
+  become: True
+  vars_files:
+  - main.yaml
+  roles:
+  - integrate
