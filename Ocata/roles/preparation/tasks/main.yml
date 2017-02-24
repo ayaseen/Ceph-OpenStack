@@ -39,6 +39,7 @@
      with_items:
       - rhel-7-server-rhceph-2-tools-rpms
       - openstack-ocata
+      - rhel-7-server-optional-rpms
       - rhel-7-server-rh-common-rpms
       - rhel-7-server-extras-rpms
      when: '"osp" in group_names'
